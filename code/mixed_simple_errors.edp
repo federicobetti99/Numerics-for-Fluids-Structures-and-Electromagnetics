@@ -1,0 +1,255 @@
+// PROJECT: PRIMAL AND MIXED FORMULATION FOR LINEAR ELASTICITY
+
+load "UMFPACK64"
+
+// PHYSICAL PARAMETERS
+
+func f1 = 100;
+func f2 = 0;
+real mu = 8e5;
+real lambda = 1e5;
+
+// MESH PARAMETERS
+
+int g = 4; // divisions of the coarsest mesh
+int I = 4; // iterations for the convergence study -> 3 refinements
+int ref = 5; // refinements for the reference solution
+
+// BORDERS : RESCALED DOMAIN
+// f1 is not rescaled because it is a pressure and not a force.
+
+real radius = 1;
+real size = 7.5;
+
+border down(t = -size/2.,size/2.){x = t; y = -size/2.; label=1;};
+border right(t = -size/2.,size/2.){x = size/2.; y = t; label=2;};
+border up(t=size/2.,-size/2.){x = t;y = size/2.; label=3;};
+border left(t=size/2.,-size/2.){x = -size/2.; y = t; label=4;};
+border hole(t = 0,2*pi){x = radius*cos(t); y = radius*sin(t);
+       label=99;};
+
+// COARSEST MESH
+
+mesh Th = buildmesh(down(2^g) + right(2^g) + up(2^g) + 
+          left(2^g) + hole(-2^(g)));
+//plot(Th,wait = 1);
+
+// MOST REFINED MESH FOR THE REFERENCE SOLUTION : 
+// TRUNCATION OF THE COARSEST MESH
+
+mesh Thr = trunc(Th, 1, split=2^ref);
+
+
+// DEFINE FINITE ELEMENT SPACES : we calculate the reference solution
+// using the mixed form.
+
+fespace Vhr(Thr,[P2,P2]); // Taylor-Hood
+// fespace Vhr(Thr,[P1b,P1b]); // MINI element
+fespace Qhr(Thr,P1);
+
+Vhr [u1r,u2r];
+Vhr [v1r,v2r];
+Qhr pr,qr;
+
+// COMPUTE THE REFERENCE SOLUTION
+
+// problem
+solve lamer([u1r,u2r,pr],[v1r,v2r,qr]) = 
+                    int2d(Thr)(-qr*(dx(u1r) + dy(u2r)) 
+                    - pr*(dx(v1r) + dy(v2r)) - (1.0/lambda)*pr*qr
+                    + 2.*mu*(dx(u1r)*dx(v1r) + dy(u2r)*dy(v2r) 
+                    + 0.5*(dy(u1r)+dx(u2r))*(dy(v1r)+ dx(v2r)))) 
+                    - int1d(Thr,2)(f1*v1r + f2*v2r) // boundary stress
+                    + on(4,u1r=0,u2r=0); // boundary condition
+
+// PLOTTING TO CHECK SYMMETRY WITH RESPECT TO X-AXIS AND PHYSICAL 
+// COHERENCE OF THE SOLUTION
+
+//plot(u1r,value = true, wait=1, fill=1);
+//plot(u2r,value = true, wait=1, fill=1);
+//plot(pr,value = true, wait=1, fill=1);
+//plot(Thr, [u1r, u2r], value=true, wait=true);
+
+
+// ITERATIONS TO CHECK THE NUMERICAL CONVERGENCE RATES
+
+
+// NUMERICAL TESTS FOR THE MIXED FORMULATION
+
+real[int] hvect(I);
+real[int] errQ1(I);
+real[int] errQ2(I);
+real[int] errH1(I);
+real[int] errL2(I);
+real[int] errP(I);
+
+for(int i = 0; i < I; ++i){
+
+// REFINING THE MESH BY TRUNCATION
+
+mesh Thi = trunc(Th, 1, split=2^(i));
+//plot(Thi,wait = 1);
+
+// FINITE ELEMENT SPACE
+
+fespace Vh(Thi,[P2,P2]); // Taylor-Hood
+// fespace Vh(Thi,[P1b,P1b]); // MINI-element
+fespace Qh(Thi,P1);
+
+Vh [u1i,u2i];
+Vh [v1i, v2i];
+Qh pi, qi;
+
+// h // -----------------------------------------
+fespace Mh(Thi,P0);
+Mh h = hTriangle;
+hvect[i]=h[].max; // calculating the mesh size
+
+// COMPUTE THE ith SOLUTION
+
+// problem
+solve lame([u1i,u2i,pi],[v1i,v2i,qi]) = 
+                    int2d(Thi)(-qi*(dx(u1i) + dy(u2i)) 
+                    - pi*(dx(v1i) + dy(v2i)) - (1.0/lambda)*pi*qi 
+                    + 2.*mu*(dx(u1i)*dx(v1i) + dy(u2i)*dy(v2i) 
+                    + 0.5*(dy(u1i)+dx(u2i))*(dy(v1i)+ dx(v2i))))
+                    - int1d(Thi,2)(f1*v1i + f2*v2i) // boundary stress
+				    + on(4,u1i=0,u2i=0); // boundary condition
+
+// ERROR COMPUTATION WITH RESPECT TO THE REFERENCE SOLUTION
+
+// L2 error for the pressure
+
+errP[i] = int2d(Thi)((pi - pr)^2);
+errP[i] = sqrt(errP[i]);
+cout << "Error p at iteration : " << i << "\t" << errP[i] << endl;
+
+// L2 error for the displacement
+
+errL2[i] = int2d(Thi)((u1i - u1r)^2 + (u2i - u2r)^2);
+errL2[i] = sqrt(errL2[i]);
+cout << "Error L2 at iteration : " << i << "\t" << errL2[i] << endl;
+
+// H1 error for the displacement
+
+errH1[i] = int2d(Thi)((u1i - u1r)^2 + (u2i - u2r)^2) 
+			+ int2d(Thi)((dx(u1i) - dx(u1r))^2 + (dy(u1i) - dy(u1r))^2 
+			+ (dx(u2i) - dx(u2r))^2 + (dy(u2i) - dy(u2r))^2);
+errH1[i] = sqrt(errH1[i]);
+cout << "Error H1 at iteration : " << i << "\t" << errH1[i] << endl;
+
+// errors on the functionals
+
+errQ1[i] = 1/size*int1d(Thi,2)(u1i - u1r);
+errQ1[i] = abs(errQ1[i]);
+cout << "Error Q1 at iteration: " << i << "\t" << errQ1[i] << endl;
+
+errQ2[i] = sqrt((u1i(0,radius) - u1r(0,radius))^2 
+         + (u2i(0,radius) - u2r(0,radius))^2);
+cout << "Error Q2 at iteration: " << i << "\t" << errQ2[i] << endl;
+
+}
+
+// EXPORTING ERRORS FOR THE MIXED FORM
+
+cout << "Saving data: " << endl; 
+
+ofstream filehmixed("h_vect_mixed.dat"); 
+filehmixed << hvect << endl;
+
+ofstream fileErrorPmixed("errorP_mixed.dat");
+fileErrorPmixed << errP << endl;
+
+ofstream fileErrorL2mixed("errorL2_mixed.dat");
+fileErrorL2mixed << errL2 << endl;
+
+ofstream fileErrorH1mixed("errorH1_mixed.dat");
+fileErrorH1mixed << errH1 << endl;
+
+ofstream fileErrorQ1mixed("errorQ1_mixed.dat");
+fileErrorQ1mixed << errQ1 << endl;
+
+ofstream fileErrorQ2mixed("errorQ2_mixed.dat");
+fileErrorQ2mixed << errQ2 << endl;
+
+
+// NUMERICAL TESTS FOR THE SIMPLE FORMULATION
+
+for(int i = 0; i < I; ++i){
+
+// REFINING THE MESH BY TRUNCATION
+
+mesh Thi = trunc(Th, 1, split=2^(i));
+//plot(Thi, wait = 1);
+
+// FINITE ELEMENT SPACES
+
+fespace Vh(Thi,[P2,P2]); // P2 continuous to compare with Taylor-Hood
+// fespace Vh(Thi,[P1,P1]); // P1 continuous to compare with MINI
+Vh [u1i,u2i];
+Vh [v1i,v2i];
+
+// h //-----------------------------------------
+fespace Qh(Thi,P0);
+Qh h = hTriangle;
+hvect[i]=h[].max; // calculating the mesh size
+
+// COMPUTE THE ith SOLUTION
+
+// problem
+solve lame([u1i,u2i],[v1i,v2i]) = 
+              int2d(Thi)(lambda*(dx(u1i) + dy(u2i))*(dx(v1i) + dy(v2i))
+              + 2.*mu*(dx(u1i)*dx(v1i) + dy(u2i)*dy(v2i) 
+              + 0.5*(dy(u1i)+dx(u2i))*(dy(v1i)+ dx(v2i)))) 
+              - int1d(Thi,2)(f1*v1i + f2*v2i) // boundary stress
+              + on(4,u1i=0,u2i=0); // boundary condition
+              
+//plot(u1i,value=true, wait=1, fill=1);
+//plot(u2i,value=true, wait=1, fill=1);
+//plot(Thi, [u1i, u2i], value=true, wait=true);
+
+// ERROR COMPUTATION WITH RESPECT TO REFERENCE SOLUTION
+
+// L2 error for the displacement
+
+errL2[i] = int2d(Thi)((u1i - u1r)^2 + (u2i - u2r)^2);
+errL2[i] = sqrt(errL2[i]);
+cout << "Error L2 at iteration : " << i << "\t" << errL2[i] << endl;
+
+// H1 error for the displacement
+
+errH1[i] = int2d(Thi)((u1i - u1r)^2 + (u2i - u2r)^2) 
+			+ int2d(Thi)((dx(u1i) - dx(u1r))^2 + (dy(u1i) - dy(u1r))^2 
+			+ (dx(u2i) - dx(u2r))^2 + (dy(u2i) - dy(u2r))^2);
+errH1[i] = sqrt(errH1[i]);
+cout << "Error H1 at iteration : " << i << "\t" << errH1[i] << endl;
+
+// errors on the functionals
+
+errQ1[i] = 1/size*int1d(Thi,2)(u1i - u1r);
+errQ1[i] = abs(errQ1[i]);
+cout << "Error Q1 at iteration: "<< i << "\t" << errQ1[i] << endl;
+
+errQ2[i] = sqrt((u1i(0,radius) - u1r(0,radius))^2 
+         + (u2i(0,radius) - u2r(0,radius))^2);
+cout << "Error Q2 at iteration: "<< i << "\t" << errQ2[i] << endl;
+
+}
+
+// EXPORTING ERRORS FOR THE SIMPLE FORM
+
+cout << "Saving data: " << endl; 
+ofstream filehsimple("h_vect_simple.dat");
+filehsimple << hvect << endl;
+
+ofstream fileErrorL2simple("errorL2_simple.dat");
+fileErrorL2simple << errL2 << endl;
+
+ofstream fileErrorH1simple("errorH1_simple.dat");
+fileErrorH1simple << errH1 << endl;
+
+ofstream fileErrorQ1simple("errorQ1_simple.dat");
+fileErrorQ1simple << errQ1 << endl;
+
+ofstream fileErrorQ2simple("errorQ2_simple.dat");
+fileErrorQ2simple << errQ2 << endl;

@@ -1,0 +1,62 @@
+// PROJECT: PRIMAL AND MIXED FORMULATION FOR LINEAR ELASTICITY
+
+// NUMERICAL TEST OF THE INF-SUP CONDITION
+
+// DOMAIN
+
+real radius = 1;
+real size = 7.5;
+
+
+border down(t = -size/2.,size/2.){x = t; y = -size/2.; label=1;};
+border right(t = -size/2.,size/2.){x = size/2.; y = t; label=2;};
+border up(t=size/2.,-size/2.){x = t;y = size/2.; label=3;};
+border left(t=size/2.,-size/2.){x = -size/2.; y = t; label=4;};
+border hole(t = 0,2*pi){x = radius*cos(t); y = radius*sin(t);
+       label=99;};
+
+// MESH
+
+int i = 1; // parameter for the refinements
+
+mesh Th = buildmesh(down(2^(i+3)) + right(2^(i+3)) + up(2^(i+3)) 
+        + left(2^(i+3)) + hole(-2^(i+3)));
+// plot(Th, wait = 1);
+
+// FINITE ELEMENTS SPACES
+
+// fespace Vh(Th,[P2,P2]); // Taylor-Hood
+fespace Vh(Th,[P1b,P1b]); // MINI element
+// fespace Vh(Th,[P1,P1]); // UNSTABLE BECAUSE OF LOCKING
+Vh [u1,u2];
+Vh [v1,v2];
+
+fespace Qh(Th,P1); // Taylor-Hood and MINI
+//fespace Qh(Th,P0); // UNSTABLE BECAUSE OF LOCKING
+Qh p,q;
+
+//fespace Xh(Th,[P2,P2,P1]); // Taylor-Hood
+fespace Xh(Th,[P1b,P1b,P1]); // MINI element
+//fespace Xh(Th,[P1,P1,P0]); // UNSTABLE BECAUSE OF LOCKING
+
+// DEFINE THE BILINEAR FORMS
+
+varf formB([u1,u2,p], [v1,v2,q]) = - int2d(Th)(q * (dx(u1) + dy(u2)));
+varf formT([u1,u2], [v1,v2]) = int2d(Th)((dx(u1)*dx(v1) + dy(u1)*dy(v1) 
+          + dx(u2)*dx(v2) + dy(u2)*dy(v2))) + int2d(Th)(u1*v1 + u2*v2); 
+varf formS(p,q) = int2d(Th)(p * q);
+
+// CONVERT TO MATRICES
+
+matrix B = formB(Xh,Xh); B.CSR;
+matrix T = formT(Vh,Vh); T.CSR;
+matrix S = formS(Qh,Qh); S.CSR;
+
+// EXPORT
+
+ofstream foutT("matT1.txt");
+foutT << T << endl;
+ofstream foutB("matB1.txt");
+foutB << B << endl;
+ofstream foutS("matS1.txt");
+foutS << S << endl;
